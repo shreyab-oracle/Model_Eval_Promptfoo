@@ -5,7 +5,7 @@ import {createRun,startRun,resumeRun,comparison,writeReport,reviewOutput,reviewQ
 import {createPrompt,approvePrompt,proposeImprovement} from '../services/prompts.mjs';
 import {connectionStatus} from '../services/status.mjs';
 import {getJSON} from '../oracle/storage.mjs';
-import {evaluationHistory,optimizationHistory} from '../services/history.mjs';
+import {evaluationHistory,optimizationHistory,archiveOptimization} from '../services/history.mjs';
 import {ENGINE_DIGEST} from '../domain/version.mjs';
 import {releaseGate} from '../services/release-gate.mjs';
 export async function route(method,pathname,body,sessionToken){
@@ -19,6 +19,8 @@ export async function route(method,pathname,body,sessionToken){
   if(method==='GET'&&pathname==='/api/status')return connectionStatus();
   if(method==='GET'&&pathname==='/api/reviews')return reviewQueue();
   if(method==='GET'&&pathname==='/api/history')return evaluationHistory();
+  const archiveMatch=pathname.match(/^\/api\/improvements\/([^/]+)\/archive$/);
+  if(method==='POST'&&archiveMatch)return{id:await archiveOptimization(archiveMatch[1],{actor,reason:body.reason,hide:body.hide===true||body.hide==='true'})};
   const gateMatch=pathname.match(/^\/api\/runs\/([^/]+)\/gate$/);
   if(method==='GET'&&gateMatch)return releaseGate(gateMatch[1]);
   const datasetMatch=pathname.match(/^\/api\/datasets\/([^/]+)$/);if(method==='GET'&&datasetMatch){const d=await repository.doc(datasetMatch[1]);if(d?.kind!=='DATASET')throw Object.assign(new Error('Dataset not found'),{statusCode:404});return d;}

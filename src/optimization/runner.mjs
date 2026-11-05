@@ -20,13 +20,19 @@ const cancelled=()=>Object.assign(new Error('Promptfoo optimization cancelled'),
 
 // Promptfoo owns search and candidate evaluation. This temporary, authenticated
 // callback boundary keeps OCI, budgets and evidence in the existing worker.
-export async function runPromptfooOptimizer(input,handle,{signal,timeoutMs=3600000,onAbort=()=>{}}={}){
+export function optimizerTimeoutMs(limits,requestTimeoutMs=180000){
+  const calls=limits.maxCalls??limits.maxCaseEvaluations*9+limits.maxProposals;
+  if(!Number.isSafeInteger(calls)||calls<1||!Number.isFinite(requestTimeoutMs)||requestTimeoutMs<1)throw new Error('Invalid optimizer timeout budget');
+  return Math.max(3600000,calls*(requestTimeoutMs+30000));
+}
+export async function runPromptfooOptimizer(input,handle,{signal,timeoutMs,onAbort=()=>{}}={}){
   if(signal?.aborted)throw cancelled();
   input=structuredClone(input);
   if(typeof input.prompt!=='string'||!input.prompt.trim()||!Array.isArray(input.trainIds)||!Array.isArray(input.validationIds))throw new Error('Invalid development optimization partition');
   const ids=[...input.trainIds,...input.validationIds],cases=new Set(ids);
   if(!ids.length||ids.some(id=>typeof id!=='string'||!id.trim())||cases.size!==ids.length||!input.trainIds.length||!input.validationIds.length||input.validationIds.length>ids.length/2)throw new Error('Invalid development optimization partition');
   if(!Number.isSafeInteger(input.limits?.maxCaseEvaluations)||input.limits.maxCaseEvaluations<ids.length||!Number.isSafeInteger(input.limits?.maxProposals)||input.limits.maxProposals<1)throw new Error('Invalid development optimization budget');
+  const deadlineMs=timeoutMs??optimizerTimeoutMs(input.limits,input.requestTimeoutMs);
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'aie-promptfoo-optimize-')),token=randomBytes(32).toString('hex');
   const assessed=new Map(),suggestions=new Map();let proposed=0,stopped=null,failure,child,log='',timer;
   const stop=error=>{if(!failure){failure=error;onAbort();child?.kill('SIGTERM');}};
@@ -93,7 +99,7 @@ export async function runPromptfooOptimizer(input,handle,{signal,timeoutMs=36000
       child=childProcess.spawn(process.execPath,[cli,'optimize','--config',configPath,'--validation-split',String(input.validationIds.length/ids.length)],{cwd:directory,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
       for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{log=(log+chunk.toString()).slice(-64000);});
       child.once('error',reject);child.once('close',resolve);
-      timer=setTimeout(()=>stop(Object.assign(new Error('Promptfoo optimization timed out'),{code:'OPTIMIZER_TIMEOUT'})),timeoutMs);
+      timer=setTimeout(()=>stop(Object.assign(new Error('Promptfoo optimization timed out'),{code:'OPTIMIZER_TIMEOUT'})),deadlineMs);
     });
     if(failure)throw failure;
     // The installed native optimizer rejects an intentionally empty first-round

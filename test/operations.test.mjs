@@ -2,6 +2,42 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const ui=await import('../src/http/operations.mjs').catch(()=>({}));
 const boot={datasets:[{id:'dev',kind:'development',caseCount:24,version:'v1'}],prompts:[{id:'prompt',text:'Frozen instructions',version:'v1'}],policies:[{id:'policy',policy:{version:'demo-policy-v1'}}],configuration:{models:{baseline:'b',candidate:'c',judge:'j'},modelNames:{baseline:'Baseline',candidate:'Candidate',judge:'Judge'}},runs:[],promptApprovals:[],proposals:[],retestLinks:[],optimizationJobs:[]};
+test('exhausted optimizer cards expose spent budget without offering another resume',()=>{
+  const b={...boot,optimizationJobs:[{id:'spent',optimizer:'Promptfoo',status:'INCOMPLETE',optimizerCurrent:true,callAttempts:433,recordedResults:433,limits:{maxCalls:433},remainingCalls:0,errors:[],candidates:[]}]};
+  const html=ui.renderOperations({boot:b,tab:'prompts'});
+  assert.match(html,/433\/433/);assert.match(html,/budget exhausted/i);assert.doesNotMatch(html,/Resume with remaining|spent\/resume/);
+});
+test('archived optimizer evidence is collapsed instead of rendered as an active failure card',()=>{
+  const b={...boot,optimizationJobs:[{id:'old',optimizer:'Promptfoo',status:'INCOMPLETE',archived:true,callAttempts:433,limits:{maxCalls:433},errors:[],candidates:[]}]};
+  const html=ui.renderOperations({boot:b,tab:'prompts'});
+  assert.match(html,/<details[^>]*>\s*<summary>Archived optimization jobs/);assert.doesNotMatch(html,/<h2>Promptfoo · INCOMPLETE/);
+});
+test('generated prompt omits the suggestion rationale and retains its recorded selection result',()=>{
+  const text='Generated reusable instructions only.',rationale='Explanation that must not be copied into the prompt.';
+  const b={...boot,optimizationJobs:[{id:'completed',status:'COMPLETED',archived:true,optimizer:'Promptfoo',candidates:[{id:'candidate',text,rationale}]}],proposals:[{parentId:'completed',changed:false,selection:{validationCases:7,candidates:[{text,passed:2}]}}]};
+  const html=ui.renderOperations({boot:b,tab:'prompts'});
+  assert.match(html,/Generated prompt · Not selected · 2\/7 validation cases/);assert.match(html,/>Copy prompt<\/button>/);assert.doesNotMatch(html,/Why this was suggested/);
+  assert.match(html,/<pre id="generated-prompt-completed-candidate">Generated reusable instructions only\.<\/pre>/);
+  assert.doesNotMatch(html,/Explanation that must not be copied/);
+  assert.doesNotMatch(html,/Saved improvement proposal/);
+});
+test('archived jobs have distinct groups and unfinished drafts never imply tested success',()=>{
+  const b={...boot,optimizationJobs:[{id:'unfinished',status:'INCOMPLETE',archived:true,optimizer:'Promptfoo',candidates:[{id:'one',text:'First draft',rationale:'First explanation'},{id:'two',text:'Second draft',rationale:'Second explanation'}]}]};
+  const html=ui.renderOperations({boot:b,tab:'prompts'});
+  assert.match(html,/data-optimization-job="unfinished"/);assert.match(html,/Generated draft 1 · Evaluation incomplete/);assert.match(html,/Generated draft 2 · Evaluation incomplete/);
+  assert.doesNotMatch(html,/Remove from view|name="hide"/);
+});
+
+test('removed optimization jobs and all their drafts disappear while other saved jobs remain',()=>{
+  const b={...boot,optimizationJobs:[
+    {id:'removed',status:'INCOMPLETE',archived:true,hidden:true,optimizer:'Promptfoo',candidates:[{text:'Removed first draft'},{text:'Removed second draft'}]},
+    {id:'kept',status:'COMPLETED',archived:true,optimizer:'Promptfoo',candidates:[{text:'Keep this completed prompt'}]}
+  ]};
+  const html=ui.renderOperations({boot:b,tab:'prompts'});
+  assert.doesNotMatch(html,/Removed first draft|Removed second draft|data-optimization-job="removed"/);
+  assert.match(html,/data-optimization-job="kept"/);assert.match(html,/Keep this completed prompt/);
+  assert.match(html,/Archived optimization jobs \(1\)/);
+});
 test('native viewer controls preserve model setup and explicit request estimates',()=>{
   assert.equal(typeof ui.renderOperations,'function');const html=ui.renderOperations({boot,tab:'setup'});
   assert.match(html,/action="\/api\/runs"/);assert.match(html,/name="datasetId"/);assert.match(html,/name="candidateModelId"/);assert.match(html,/432/);

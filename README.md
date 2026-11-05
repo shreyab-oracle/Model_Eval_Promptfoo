@@ -95,9 +95,13 @@ In **Prompts**, save a manual revision or select **Suggest improvements and eval
 
 Limits, request estimates, cancellation, proposal history, differences and optional retests remain available. Suggested prompts require approval and never activate automatically. Optimization cannot change policy, labels or release thresholds.
 
+Optimization resumes reuse saved drafts and received responses. The native deadline accounts for the frozen call budget and request timeout. Exhausted jobs cannot resume. **Archive** moves an inactive job into collapsed history while retaining its evidence. Job cards show calls started, results saved, remaining budget and expandable format errors.
+
+Generated drafts are grouped by run and labelled with their recorded selection result. **Copy prompt** copies only the instructions. Saved prompts are labelled as original instructions, manual revisions or optimizer-selected prompts.
+
 ## Datasets and verified live results
 
-Included datasets are synthetic. They contain invoice facts and expected behavior; tested models do not receive reference labels. 
+Included datasets are synthetic. They contain invoice facts and expected behavior; tested models do not receive reference labels. Demonstration labels, judge calibration and release evidence require business approval. PDF upload is not supported.
 
 | Category                       |  Development |       Release |
 | ------------------------------ | -----------: | ------------: |

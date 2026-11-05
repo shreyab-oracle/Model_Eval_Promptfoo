@@ -25,6 +25,11 @@ document.addEventListener('submit',async event=>{
 });
 document.addEventListener('click',async event=>{
   const button=event.target.closest('button');if(!button)return;
+  if(button.dataset.copyPrompt){
+    try{await navigator.clipboard.writeText(document.getElementById(button.dataset.copyPrompt).textContent);show('Prompt copied.');}
+    catch{show('Copy unavailable. Select the prompt text.',true);}
+    return;
+  }
   if(button.hasAttribute('data-status')){
     button.disabled=true;try{document.getElementById('connection-status').textContent=JSON.stringify(await request('/api/status'),null,2);}catch(error){show(error.message,true);}finally{button.disabled=false;}
   }

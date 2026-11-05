@@ -1,4 +1,7 @@
 .output-header .pills > div.summary{display:none}
+body[data-operations] .optimization-job{border:1px solid #d7dbd1;border-radius:8px;padding:18px;margin:14px 0;background:#fff}
+body[data-operations] .optimization-job h3{margin:0}
+body[data-operations] .optimization-job>p{font-size:13px;color:#526057}
 .aie-answer-summary{font-size:13px;line-height:1.6;margin:8px 0;white-space:normal}
 .relative.p-6.mt-2.bg-card > .flex.justify-between.w-full > div{display:none!important}
 .aie-outcome-chart{width:100%;max-width:1000px;margin:auto;font:14px/1.5 'Segoe UI',sans-serif}

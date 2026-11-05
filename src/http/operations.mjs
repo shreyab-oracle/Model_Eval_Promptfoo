@@ -64,13 +64,45 @@ function reviews(queue,bundle){
     return card(`${caseLabel(q,q.caseIndex)} · ${roleLabel(q.role)} · repetition ${(q.repeat??0)+1}`,`<p>${q.critical?'Confirmed critical failure':q.disagreement?'Judges disagree; both explanations are retained':'Needs human review'}</p>${q.optimization?details('Saved practice facts and answer',pre(q.caseFacts)+pre(q.response)):link(caseResultsUrl(q),'Compare invoice facts and both models in Promptfoo')}<h3>Programmed findings</h3>${findingsHTML({...output,checks:q.checks})}<h3>Original judge evidence</h3>${judgesHTML(q.judges)}${controls}${details('Review audit',audit((bundle?.reviews||[]).filter(r=>r.outputId===q.outputId)))}`,`data-review-item data-case-index="${Number.isInteger(q.caseIndex)?q.caseIndex:''}" data-case-id="${e(q.caseId||'')}" data-category="${e(q.category||'')}"`);
   }).join(''):card('Human reviews','<p>No pending review items in this selection. This does not establish release eligibility.</p>');
 }
+function optimizationJobsHTML(jobs,proposals=[]){
+  jobs=jobs.filter(job=>!job.hidden);
+  const drafts=job=>{
+    const result=proposals.find(p=>p.parentId===job.id);
+    return(job.candidates||[]).map((c,index)=>{
+      const stats=result?.selection?.candidates?.find(s=>s.text?.trim()===c.text?.trim());
+      const selected=result?.changed===true&&result.text?.trim()===c.text?.trim();
+      const status=result?(selected?'Selected':'Not selected'):job.status==='RUNNING'?'Testing':job.status==='COMPLETED'?'Result not recorded':'Evaluation incomplete';
+      const label=(job.candidates.length===1?'Generated prompt':`Generated draft ${index+1}`)+` · ${status}`+(Number.isInteger(stats?.passed)&&Number.isInteger(result?.selection?.validationCases)?` · ${stats.passed}/${result.selection.validationCases} validation cases`:'');
+      const id=`generated-prompt-${job.id}-${c.id||index}`;
+      return details(label,`<h4>Generated prompt</h4>${button('Copy prompt',`type="button" data-copy-prompt="${e(id)}"`)}<pre id="${e(id)}">${e(value(c.text))}</pre>`);
+    }).join('');
+  };
+  const visible=jobs.filter(job=>!job.archived).map(job=>{
+    const used=job.callAttempts||0,limit=job.limits?.maxCalls,remaining=job.remainingCalls??(Number.isFinite(limit)?Math.max(0,limit-used):null),exhausted=remaining===0&&!job.proposalDone;
+    let actions='';
+    if(job.status==='RUNNING')actions=form(`/api/runs/${job.id}/cancel`,button('Cancel new work'));
+    else{
+      if(exhausted)actions+='<p>Call budget exhausted.</p>';
+      else if(job.optimizerCurrent===false)actions+='<p>Evaluator updated. Prepare a new optimization job.</p>';
+      else if(['INCOMPLETE','CANCELLED'].includes(job.status))actions+=form(`/api/runs/${job.id}/resume`,button('Resume with remaining call limit'));
+      actions+=form(`/api/improvements/${job.id}/archive`,hidden('reason','Archived from the prompt optimization view.')+button('Archive'));
+    }
+    const errors=job.evaluationErrors?.length?details(`Format errors (${job.evaluationFailures||0})`,pre(job.evaluationErrors)):'';
+    return card(`${e(job.optimizer||'Not recorded')} · ${e(job.status)}`,`<p>${used}/${e(limit)} calls started · ${job.recordedResults||0} saved · ${job.activeCalls||0} running${remaining!==null?` · ${remaining} remaining`:''}</p><p>${job.uncertainCalls||0} uncertain · ${job.evaluationFailures||0} format failures</p>${actions}${(job.errors||[]).filter(error=>!(exhausted&&['GEPA_CALL_LIMIT','OPTIMIZATION_BUDGET_EXHAUSTED'].includes(error.code))).map(error=>`<p>${e(error.message)}</p>`).join('')}${errors}${drafts(job)}`);
+  }).join('');
+  const archived=jobs.filter(job=>job.archived);
+  return visible+(archived.length?details(`Archived optimization jobs (${archived.length})`,archived.map(job=>{
+    const date=job.createdAt?new Date(job.createdAt):null,label=date&&!Number.isNaN(date.valueOf())?date.toLocaleString('en-IN',{timeZone:'Asia/Calcutta'}):'Date not recorded';
+    return `<section class="optimization-job" data-optimization-job="${e(job.id)}"><h3>${e(job.optimizer)} · ${e(job.status)}</h3><p>${e(label)} · ${job.callAttempts||0}/${e(job.limits?.maxCalls)} calls</p>${drafts(job)}</section>`;
+  }).join('')):'');
+}
 function prompts(boot){
   const manual=card('Save a prompt revision',form('/api/prompts',field('Version',input('version','required'))+field('Parent prompt',select('parentId',boot.prompts.map(p=>[p.id,promptLabel(p)])))+field('Complete instructions','<textarea name="text" minlength="40" maxlength="20000" required rows="8"></textarea>')+button('Save revision')));
   const developmentRuns=boot.runs.filter(r=>r.kind==='development'&&r.engineCurrent!==false&&['COMPLETED','INCOMPLETE'].includes(r.status));
   const optimization=card('Promptfoo prompt optimization',form('/api/improvements',field('Development run',`<select name="sourceRunId" required>${developmentRuns.map(r=>`<option value="${e(r.id)}"${Number.isInteger(r.caseCount)?` data-case-count="${r.caseCount}"`:''}>${e(testLabel(r))}</option>`).join('')}</select>`)+field('Maximum case evaluations (24–120)',input('limits.maxCaseEvaluations','type="number" min="24" max="120" value="48" required'))+field('Maximum proposals (1–6)',input('limits.maxProposals','type="number" min="1" max="6" value="3" required'))+field('Retest an acceptable revision',input('autoRetest','type="checkbox" checked'))+'<p id="optimization-estimate">Up to 435 optimization requests with the default limits, plus 18 retest requests per development case when enabled. The backend enforces the frozen call budget. Suggested prompts require approval and never activate automatically.</p>'+button('Suggest improvements and evaluate'),'job'));
-  const jobs=(boot.optimizationJobs||[]).map(job=>card(`${e(job.optimizer||'Not recorded')} · ${job.status}`,`<p>${job.activeCalls||0} model request(s) running; ${job.uncertainCalls||0} uncertain outcomes; ${job.evaluationFailures||0} answer/review format failures.</p>${job.optimizerCurrent===false?'<p>Start a new improvement under the current evaluator. Saved history is retained.</p>':['INCOMPLETE','CANCELLED'].includes(job.status)?form(`/api/runs/${job.id}/resume`,button('Resume with remaining call limit')):job.status==='RUNNING'?form(`/api/runs/${job.id}/cancel`,button('Cancel new work')):''}${(job.errors||[]).map(error=>`<p>${e(error.message)}</p>`).join('')}${(job.candidates||[]).map(c=>details(`Proposal ${c.iteration}`,`<p>${e(c.rationale)}</p>${pre(c.text)}`)).join('')}`)).join('');
-  return manual+optimization+jobs+boot.prompts.map(p=>card(promptLabel(p),pre(p.text)+(p.generated&&!boot.promptApprovals.some(a=>a.parentId===p.id&&a.approved)?form('/api/prompts/approve',hidden('promptId',p.id)+reason()+button('Approve for future selection')):''))).join('')+
-    (boot.proposals||[]).map(p=>card('Saved improvement proposal',`<p>${e(p.rationale)}</p><p>${p.changed===false?'Original instructions retained':'Requires human approval before selection'}</p>${details('Prompt changes',(p.diff||[]).map(d=>`<p>${e(d.type)}: ${e(d.text)}</p>`).join(''))}${boot.retestLinks.filter(l=>l.parentId===p.id&&l.runId).map(l=>link(`/eval/${encodeURIComponent(l.runId)}`,'Open development retest')).join('')}`)).join('');
+  const jobs=optimizationJobsHTML(boot.optimizationJobs||[],boot.proposals||[]);
+  return manual+optimization+jobs+boot.prompts.map(p=>card(promptLabel(p),`<p>${p.generated?'Optimizer-selected prompt':p.parentId?'Manual revision':'Original instructions'}</p>`+pre(p.text)+(p.generated&&!boot.promptApprovals.some(a=>a.parentId===p.id&&a.approved)?form('/api/prompts/approve',hidden('promptId',p.id)+reason()+button('Approve for future selection')):''))).join('')+
+    (boot.proposals||[]).map(p=>card('Optimization result',`<p>${e(p.rationale)}</p><p>${p.changed===false?'Original instructions retained':'Requires human approval before selection'}</p>${details('Prompt changes',(p.diff||[]).map(d=>`<p>${e(d.type)}: ${e(d.text)}</p>`).join(''))}${boot.retestLinks.filter(l=>l.parentId===p.id&&l.runId).map(l=>link(`/eval/${encodeURIComponent(l.runId)}`,'Open development retest')).join('')}`)).join('');
 }
 function approvals(boot){
   return card('Record a completed business review',form('/api/evidence',field('Approval type',select('type',[['labels','Reference labels'],['calibration','Judge calibration'],['release','Release evidence']]))+field('Reviewed dataset or run',select('targetId',[...boot.datasets.map(d=>[d.id,`${d.version} · dataset`]),...boot.runs.map(r=>[r.id,testLabel(r)])]))+field('Review reference',input('sourceId','required'))+reason()+field('Decision',select('approved',[['true','Approved'],['false','Not approved']]))+button('Save approval decision')))+card('Service connections',button('Check connections (no inference)', 'type="button" data-status')+'<pre id="connection-status">Not checked</pre>');

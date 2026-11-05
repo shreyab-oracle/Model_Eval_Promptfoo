@@ -1,4 +1,5 @@
 import {repository} from '../db/repository.mjs';
+import {config} from '../config.mjs';
 import {digest} from '../domain/policy.mjs';
 import {assertDevelopment,lineDiff} from '../domain/prompt.mjs';
 import {runBundle,createRun} from './runs.mjs';
@@ -21,7 +22,7 @@ export const improvementJobId=({sourceRunId,inputDigest,autoRetest,actor,optimiz
 export async function proposeImprovement({sourceRunId,autoRetest=true,actor,limits}){
   const b=await runBundle(sourceRunId);assertDevelopment(b.snapshot.dataset);
   assertFrozenEngine(b.snapshot);
-  const optimizer={name:OPTIMIZER_NAME,version:OPTIMIZER_VERSION,digest:OPTIMIZER_DIGEST,limits:optimizationLimits(limits),plan:optimizationPlan(b.snapshot.dataset)};
+  const optimizer={name:OPTIMIZER_NAME,version:OPTIMIZER_VERSION,digest:OPTIMIZER_DIGEST,limits:optimizationLimits(limits),plan:optimizationPlan(b.snapshot.dataset),requestTimeoutMs:config.timeoutMs};
   await verifyOptimizer();
   if(!['COMPLETED','INCOMPLETE'].includes(b.run.status))throw new Error('Use a completed or incomplete development run with recorded failures');
   const failed=b.outputs.filter(o=>o.checks.some(c=>c.status==='FAIL')||o.judges.some(j=>j.critical||Object.values(j.scores).some(s=>s<2)));

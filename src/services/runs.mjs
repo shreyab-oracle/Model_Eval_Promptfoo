@@ -45,7 +45,15 @@ export async function createRun({datasetId,promptId,policyId,baselineModelId,can
   await repository.createRun({id,manifestId,kind:d.dataset.kind,tasks});return repository.run(id);
 }
 export async function startRun(id){await snapshotFor(id,true);await repository.startRun(id);return repository.run(id);}
-export async function resumeRun(id){await snapshotFor(id,true);await recoverReceivedAnswers(id);await repository.resume(id);return repository.run(id);}
+export async function resumeRun(id,{loadSnapshot=snapshotFor,store=repository,recover=recoverReceivedAnswers}={}){
+  const {snapshot}=await loadSnapshot(id,true);
+  if(snapshot.optimizer){
+    const proposal=(await store.tasks(id)).find(t=>t.stage==='PROPOSE');
+    if(proposal?.status!=='DONE'&&(await store.docs('GEPA_CALL_START',id)).length>=snapshot.optimizer.limits.maxCalls)
+      throw Object.assign(new Error('Optimization call budget exhausted; this job cannot send further requests.'),{code:'OPTIMIZATION_BUDGET_EXHAUSTED',statusCode:409});
+  }
+  await recover(id);await store.resume(id);return store.run(id);
+}
 async function snapshotFor(id,verify=false){const run=await repository.run(id);if(!run)throw new Error('Run not found');const manifest=await repository.doc(run.manifestId);if(!manifest)throw new Error('Run manifest missing');const value=verify?await getJSON(manifest.artifact):manifest.snapshot;if(digest(value)!==digest(manifest.snapshot))throw new Error('Frozen manifest mismatch');if(verify){assertFrozenEngine(value.source||value);assertExecutionProtocol(value.source||value);if(value.optimizer)assertOptimizer(value);}return{run,manifest,snapshot:value};}
 export async function runBundle(id){
   const {run,manifest,snapshot}=await snapshotFor(id),outputDocs=await repository.docs('OUTPUT',id),judges=await repository.docs('JUDGE',id),reviews=await repository.docs('REVIEW',id),evidenceDocs=[...await repository.docs('EVIDENCE',id),...await repository.docs('EVIDENCE',snapshot.datasetId)];

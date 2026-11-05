@@ -67,12 +67,42 @@ export async function evaluateOptimizationCase({snapshot,jobId,text,c,invoke,sto
   await store.saveDoc({id:digest({jobId,text,caseId:c.id}),kind:'GEPA_EVALUATION',parentId:jobId,value});return value;
 }
 
+export function createOptimizationProposer({snapshot,jobId,invoke,store=repository,guard=async()=>{},loadTrace=getJSON}){
+  let iteration=0;
+  return async request=>{
+    await guard();const slot=++iteration;
+    if(slot>snapshot.optimizer.limits.maxProposals)throw new Error('Prompt optimization proposal limit exceeded');
+    const parentPromptDigest=digest(request.text),saved=(await store.docs('GEPA_CANDIDATE',jobId)).filter(c=>c.iteration===slot);
+    if(saved.length>1)throw new Error('Ambiguous saved proposal iteration; keep its evidence and start a new job.');
+    if(saved.length){
+      if(saved[0].parentPromptDigest!==parentPromptDigest)throw new Error('Saved proposal parent differs from the frozen search chain');
+      const proposal=validateProposal(saved[0],snapshot);return{text:proposal.text,rationale:proposal.rationale,responseSource:'SAVED_RESPONSE'};
+    }
+    // A received suggestion may have been saved before its candidate document.
+    // Recover by logical operation, not mutable feedback serialization.
+    const operation=`propose/${slot}`,starts=(await store.docs('GEPA_CALL_START',jobId)).filter(s=>s.operation===operation);
+    const results=await store.docs('GEPA_CALL_RESULT',jobId),received=results.find(r=>r.success&&starts.some(s=>s.id===r.startId));
+    let response;
+    if(received){
+      response=await loadTrace(received.artifact);
+      const recorded=JSON.parse(response.options?.messages?.at(-1)?.content||'{}');
+      if(digest(recorded.currentPrompt)!==parentPromptDigest)throw new Error('Received proposal parent differs from the frozen search chain');
+    }else{
+      const source=snapshot.source,messages=[{role:'SYSTEM',content:IMPROVEMENT_INSTRUCTIONS},{role:'USER',content:JSON.stringify({currentPrompt:request.text,immutablePolicy:source.policy,developmentFeedback:request.feedback})}];
+      response=await invoke(operation,{modelId:source.models.judge,mode:source.modes.judge,messages,settings:settingsForRole(source,'judge'),compartmentId:source.compartmentId,endpoint:source.genaiEndpoint},r=>validateProposal(parseJSON(r.text),snapshot));
+    }
+    await guard();const proposal=validateProposal(parseJSON(response.text),snapshot),id=digest({jobId,proposal:slot,text:proposal.text});
+    await store.saveDoc({id,kind:'GEPA_CANDIDATE',parentId:jobId,value:{...proposal,iteration:slot,parentPromptDigest}});
+    return{text:proposal.text,rationale:proposal.rationale,responseSource:received?'SAVED_RESPONSE':response.responseSource};
+  };
+}
+
 export async function optimizePrompt(snapshot,task,{isAlive=()=>true,signal}={}){
   assertOptimizer(snapshot);const source=snapshot.source;
   let runnerAlive=true;
   const guard=async()=>{if(!runnerAlive||signal?.aborted||!isAlive()||!await repository.heartbeat(task))throw Object.assign(new Error('Prompt optimization cancelled or worker lease lost'),{code:'LEASE_LOST'});};
   const invoke=createCallLedger({jobId:task.runId,cycle:task.cycle,maxCalls:snapshot.optimizer.limits.maxCalls,store:repository,guard,call:chat,writeTrace:(id,value)=>putJSON('optimization-traces',id,value),loadTrace:getJSON});
-  let evaluated=0,proposed=0;
+  let evaluated=0;const propose=createOptimizationProposer({snapshot,jobId:task.runId,invoke,guard});
   const handle=async request=>{
     await guard();
     // Validate all proposed text on the Node side before any tested-model call.
@@ -84,13 +114,9 @@ export async function optimizePrompt(snapshot,task,{isAlive=()=>true,signal}={})
       for(const id of request.caseIds){await guard();rows.push(await evaluateOptimizationCase({snapshot,jobId:task.runId,text:request.text,c:source.dataset.cases.find(c=>c.id===id),invoke,guard}));}
       return{rows};
     }
-    if(++proposed>snapshot.optimizer.limits.maxProposals)throw new Error('Prompt optimization proposal limit exceeded');
-    const messages=[{role:'SYSTEM',content:IMPROVEMENT_INSTRUCTIONS},{role:'USER',content:JSON.stringify({currentPrompt:request.text,immutablePolicy:source.policy,developmentFeedback:request.feedback})}];
-    const response=await invoke(`propose/${proposed}`,{modelId:source.models.judge,mode:source.modes.judge,messages,settings:settingsForRole(source,'judge'),compartmentId:source.compartmentId,endpoint:source.genaiEndpoint},r=>validateProposal(parseJSON(r.text),snapshot));
-    const proposal=validateProposal(parseJSON(response.text),snapshot),id=digest({jobId:task.runId,proposal:proposed,text:proposal.text});
-    await repository.saveDoc({id,kind:'GEPA_CANDIDATE',parentId:task.runId,value:{...proposal,iteration:proposed,parentPromptDigest:digest(request.text)}});return{text:proposal.text,rationale:proposal.rationale};
+    return propose(request);
   };
-  const search=await runPromptfooOptimizer({prompt:source.prompt,...snapshot.optimizer.plan,limits:snapshot.optimizer.limits},handle,{signal,onAbort:()=>{runnerAlive=false;}});
+  const search=await runPromptfooOptimizer({prompt:source.prompt,...snapshot.optimizer.plan,limits:snapshot.optimizer.limits,requestTimeoutMs:snapshot.optimizer.requestTimeoutMs},handle,{signal,onAbort:()=>{runnerAlive=false;}});
   await guard();const evaluations=await repository.docs('GEPA_EVALUATION',task.runId),validation=source.dataset.cases.filter(c=>snapshot.optimizer.plan.validationIds.includes(c.id));
   const selected=selectOptimizationCandidate(source.prompt,validation,evaluations);
   const artifact=await putJSON('optimization-results',task.runId,{search,selected,evaluations,limits:snapshot.optimizer.limits});
