@@ -1,0 +1,29 @@
+{
+  "name": "ai-model-evaluation-upgrades",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:live": "node scripts/live-acceptance.mjs",
+    "build": "node scripts/build-ui.mjs",
+    "dev": "node scripts/dev.mjs",
+    "api": "node --env-file=.env.local src/http/server.mjs",
+    "worker": "node --env-file=.env.local src/services/worker.mjs",
+    "ui": "node --env-file=.env.local src/http/server.mjs",
+    "verify": "node --env-file=.env.local scripts/verify-connections.mjs",
+    "verify:optimizer": "node scripts/verify-optimizer.mjs",
+    "migrate": "node --env-file=.env.local scripts/cli.mjs migrate",
+    "data:generate": "node scripts/cli.mjs generate",
+    "data:import": "node --env-file=.env.local scripts/cli.mjs import",
+    "gate": "node --env-file=.env.local scripts/cli.mjs gate",
+    "cli": "node --env-file=.env.local scripts/cli.mjs"
+  },
+  "dependencies": {
+    "oracledb": "26.0.0",
+    "promptfoo": "0.125.1"
+  }
+}

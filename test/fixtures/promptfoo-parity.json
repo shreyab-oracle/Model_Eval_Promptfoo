@@ -1,0 +1,34 @@
+{
+  "description": "Saved synthetic evidence authored independently of expectedFor and the checker. Never sampled from a paid provider.",
+  "case": {
+    "id": "PARITY-INVOICE", "category": "routine",
+    "po": {"id":"po","quantity":2,"unitCents":10000,"supplierId":"supplier","currency":"USD"},
+    "receipt": {"id":"receipt","quantity":2},
+    "invoice": {"id":"invoice","quantity":2,"unitCents":10000,"supplierId":"supplier","currency":"USD"},
+    "supplierMessage": "Please review.",
+    "evidence": {"activeHolds":[],"duplicate":false,"conflicts":[],"historicalHoldIds":[],"payments":[],"releases":[]}
+  },
+  "answer": {
+    "action":"NO_MATCHING_EXCEPTION","holdReasons":[],"missingFacts":[],"owner":"Accounts Payable",
+    "nextStep":"Accounts Payable should continue normal approval.","sources":["po","receipt","invoice"],
+    "calculations":{"billedTotalCents":20000,"quantityDiscrepancy":0,"discrepancyAmountCents":0,"priceDeltaCents":0},
+    "paymentStatus":"UNKNOWN","holdReleaseStatus":"UNKNOWN",
+    "reply":"Thank you. Please continue normal approval. Payment is not verified."
+  },
+  "judge": {
+    "scores":{"policy":3,"evidence":3,"tone":3,"clarity":3,"nextSteps":3},"critical":false,
+    "rationale":"The matching invoice can continue normal approval without claiming payment.",
+    "evidence":[{"quote":"Payment is not verified.","axis":"evidence","reason":"No invented payment claim."}]
+  },
+  "scenarios": [
+    {"name":"exact quantity boundary","failed":[]},
+    {"name":"exact two percent price boundary","invoice":{"unitCents":10200},"answer":{"calculations":{"billedTotalCents":20400,"quantityDiscrepancy":0,"discrepancyAmountCents":0,"priceDeltaCents":200}},"failed":[]},
+    {"name":"one cent beyond tolerance","invoice":{"unitCents":10201},"answer":{"calculations":{"billedTotalCents":20402,"quantityDiscrepancy":0,"discrepancyAmountCents":0,"priceDeltaCents":201}},"failed":["ACTION","HOLD_PRESERVATION","OWNER"],"critical":true},
+    {"name":"one unit over received","receipt":{"quantity":1},"answer":{"calculations":{"billedTotalCents":20000,"quantityDiscrepancy":1,"discrepancyAmountCents":10000,"priceDeltaCents":0}},"failed":["ACTION","HOLD_PRESERVATION","OWNER"],"critical":true},
+    {"name":"one unit over ordered","po":{"quantity":1},"answer":{"calculations":{"billedTotalCents":20000,"quantityDiscrepancy":1,"discrepancyAmountCents":10000,"priceDeltaCents":0}},"failed":["ACTION","HOLD_PRESERVATION","OWNER"],"critical":true},
+    {"name":"preserve duplicate and existing holds","evidence":{"activeHolds":["AP_CONTROL"],"duplicate":true},"failed":["ACTION","HOLD_PRESERVATION","OWNER"],"critical":true},
+    {"name":"unsupported payment contradicts structured status","answer":{"reply":"Your invoice has been paid. Please continue normal approval."},"failed":["UNSUPPORTED_PAYMENT_CLAIM"],"critical":true},
+    {"name":"unsupported release contradicts structured status","answer":{"reply":"The hold has been released. Please continue normal approval."},"failed":["UNSUPPORTED_RELEASE_CLAIM"],"critical":true},
+    {"name":"malformed first answer is retained","text":"{ broken original answer","failed":["STRUCTURED_OUTPUT"]}
+  ]
+}

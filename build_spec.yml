@@ -1,0 +1,22 @@
+version: 0.1
+component: build
+timeoutInSeconds: 1800
+shell: bash
+failImmediatelyOnError: true
+# Configure existing project credentials/wallet and EVAL_RUN_ID securely in the
+# existing build environment. No evaluation is initiated by this file.
+steps:
+  - type: Command
+    name: Test and build
+    command: |
+      node --version
+      node -e "if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('Configure Node 24+ on this existing build runner')"
+      npm ci --ignore-scripts
+      npm run verify:optimizer
+      npm test
+      npm run build
+  - type: Command
+    name: Required completed live evaluation gate
+    command: |
+      : "${EVAL_RUN_ID:?Set an explicitly selected completed live evaluation run ID}"
+      node scripts/cli.mjs gate --run "$EVAL_RUN_ID"
