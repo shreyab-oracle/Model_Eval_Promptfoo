@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source=fs.readFileSync(new URL('../frontend/viewer-bootstrap.js',import.meta.url),'utf8');
 function browser(pathname='/eval',headers=[],reviewCounts,outcomes,charts=[]){
   const listeners=new Map(),redirects=[],body=[];
-  const element=tag=>({tag,children:[],dataset:{},offsetHeight:30,setAttribute(){},addEventListener(){},
+  const element=tag=>({tag,children:[],dataset:{},style:{},offsetHeight:30,setAttribute(){},addEventListener(){},
     append(...items){for(const item of items){item.parent=this;this.children.push(item);}},add(item){this.append(item);},replaceChildren(){this.children=[];},
     remove(){this.parent.children=this.parent.children.filter(item=>item!==this);},
     querySelectorAll(selector){return this.children.filter(item=>selector==='select'?item.tag==='select':selector==='[data-run-controls]'?item.dataset?.runControls:selector.startsWith('.')?item.className===selector.slice(1):false);},
@@ -50,17 +50,24 @@ test('native badge distinguishes pending verdicts from genuine errors and incomp
   assert.equal(label.textContent,'Errors:');
 });
 
-test('whole-run header and pass chart include reviews and missing answers in their denominator',async()=>{
+test('whole-run chart separates passed, failed, review and incomplete answers',async()=>{
   const header={children:[],append(item){this.children.push(item);},querySelector(selector){return selector==='.provider'?{textContent:'candidate'}:this.children.find(c=>c.className===selector.slice(1));}};
   const chart={children:[],append(item){this.children.push(item);},querySelector(selector){return this.children.find(c=>c.className===selector.slice(1));}};
   const outcomes={baseline:{total:300,pass:132,fail:168,needsReview:0,incomplete:0},candidate:{total:300,pass:169,fail:118,needsReview:13,incomplete:0}};
   const b=browser('/eval/saved',[header],undefined,outcomes,[chart]);b.start();await new Promise(setImmediate);
-  const summary=header.children[0];assert.match(summary.textContent,/56.33% passed \(169\/300 planned answers\)/);
+  const summary=header.children[0];assert.match(summary.textContent,/56.33% passed · 169\/300 answers/);
   assert.match(summary.textContent,/118 failed · 13 need review/);assert.match(summary.textContent,/Whole run/);assert.doesNotMatch(summary.textContent,/58.89|287/);
-  assert.equal(chart.children[0].children[2].children[1].value,169/300*100);
+  const panel=chart.children[0],candidate=panel.children[2];
+  assert.equal(panel.children[0].children[0].textContent,'Answer outcomes');
+  assert.equal(panel.children[0].children[1].textContent,'Whole run');
+  assert.deepEqual(candidate.children[2].children.map(c=>c.textContent),['169 passed','118 failed','13 need review']);
+  assert.equal(candidate.children[1].children[0].style.width,(169/300*100)+'%');
+  assert.ok(Math.abs(parseFloat(candidate.children[1].children[2].style.width)-13/300*100)<1e-10);
   b.update();assert.equal(header.children.length,1);assert.equal(chart.children.length,1);
   outcomes.candidate={total:300,pass:169,fail:118,needsReview:12,incomplete:1};b.update();assert.match(summary.textContent,/12 need review · 1 incomplete/);
+  assert.deepEqual(panel.children[2].children[2].children.map(c=>c.textContent),['169 passed','118 failed','12 need review','1 incomplete']);
   b.location.pathname='/eval/other';b.update();assert.equal(summary.textContent,'Pass rate: Not recorded');
+  assert.equal(panel.children[2].children[0].children[1].textContent,'Not recorded');assert.equal(panel.children[2].children.length,1);
 });
 
 test('native prompt, dataset and history clicks open the single Oracle workflow',()=>{

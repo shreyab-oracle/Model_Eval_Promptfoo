@@ -15,31 +15,45 @@ document.addEventListener('DOMContentLoaded',()=>{
   },true);
   const keys={REGRESSION:'newCandidateFailure',IMPROVEMENT:'candidateImprovement',CRITICAL:'confirmedCriticalFailure',REVIEW:'needsHumanReview',PENDING:'unresolved'};
   let current,reviewCounts,outcomes;
-  const chartSelector='.relative.p-6.mt-2.bg-card > .flex.justify-between.w-full > div:first-child';
+  const chartSelector='.relative.p-6.mt-2.bg-card > .flex.justify-between.w-full';
   function labelOutcomes(){
     for(const header of document.querySelectorAll('.output-header')){
       const role=header.querySelector('.provider')?.textContent.trim(),count=outcomes?.[role];
       let summary=header.querySelector('.aie-answer-summary');
       if(!summary){summary=document.createElement('div');summary.className='aie-answer-summary';header.append(summary);}
-      const text=count?.total?`${(100*count.pass/count.total).toFixed(2)}% passed (${count.pass}/${count.total} planned answers) · ${count.fail} failed · ${count.needsReview} need review${count.incomplete?` · ${count.incomplete} incomplete`:''} · Whole run`:'Pass rate: Not recorded';
+      const text=count?.total?`${(100*count.pass/count.total).toFixed(2)}% passed · ${count.pass}/${count.total} answers · ${count.fail} failed · ${count.needsReview} need review${count.incomplete?` · ${count.incomplete} incomplete`:''} · Whole run`:'Pass rate: Not recorded';
       if(summary.textContent!==text)summary.textContent=text;
       summary.title='Whole-run counts include every planned answer, including pending reviews and incomplete results. Case and search filters change the rows, not this overall rate.';
     }
-    // Replace only the stock pass-rate chart. Its denominator excludes errors.
-    // Keep the native page-level distribution and paired-answer charts intact.
+    // Use the recorded whole-run outcomes instead of binary score charts.
     for(const container of document.querySelectorAll(chartSelector)){
-      let chart=container.querySelector('.aie-pass-chart');
-      if(!chart){chart=document.createElement('div');chart.className='aie-pass-chart';container.append(chart);}
+      let chart=container.querySelector('.aie-outcome-chart');
+      if(!chart){chart=document.createElement('section');chart.className='aie-outcome-chart';chart.setAttribute('aria-label','Answer outcomes');container.append(chart);}
       const signature=JSON.stringify(outcomes||null);if(chart.dataset.outcomes===signature)continue;
       chart.dataset.outcomes=signature;chart.replaceChildren();
-      const title=document.createElement('strong');title.textContent='Passed / all planned answers (whole run)';chart.append(title);
+      const heading=document.createElement('div');heading.className='aie-chart-heading';
+      const title=document.createElement('strong');title.textContent='Answer outcomes';
+      const scope=document.createElement('small');scope.textContent='Whole run';scope.title='Includes every planned answer. Table filters do not change these totals.';heading.append(title,scope);chart.append(heading);
+      const statuses=[['pass','Passed'],['fail','Failed'],['needsReview','Needs review'],['incomplete','Incomplete']];
       for(const role of ['baseline','candidate']){
-        const count=outcomes?.[role],row=document.createElement('div');row.className='aie-pass-row';
-        const label=document.createElement('span');label.textContent=count?.total?`${role}: ${(100*count.pass/count.total).toFixed(2)}% (${count.pass}/${count.total})`:`${role}: Not recorded`;
-        const bar=document.createElement('meter');bar.min=0;bar.max=100;bar.value=count?.total?100*count.pass/count.total:0;bar.setAttribute('aria-label',label.textContent);
-        row.append(label,bar);chart.append(row);
+        const count=outcomes?.[role],row=document.createElement('div');row.className='aie-outcome-row';
+        const label=document.createElement('div');label.className='aie-chart-heading';
+        const name=document.createElement('strong');name.textContent=role==='baseline'?'Baseline':'Candidate';
+        const rate=document.createElement('span');rate.textContent=count?.total?`${(100*count.pass/count.total).toFixed(2)}% passed · ${count.pass}/${count.total}`:'Not recorded';label.append(name,rate);row.append(label);
+        if(count?.total){
+          const bar=document.createElement('div');bar.className='aie-outcome-bar';bar.setAttribute('role','img');
+          const counts=document.createElement('div');counts.className='aie-outcome-counts';
+          const descriptions=[];
+          for(const [key,label] of statuses){
+            if(key==='incomplete'&&!count[key])continue;
+            const text=`${count[key]} ${key==='needsReview'?'need review':label.toLowerCase()}`;descriptions.push(text);
+            const item=document.createElement('span');item.className='aie-status-'+key;item.textContent=text;counts.append(item);
+            if(count[key]){const segment=document.createElement('span');segment.className='aie-status-'+key;segment.style.width=(100*count[key]/count.total)+'%';segment.title=text;bar.append(segment);}
+          }
+          bar.setAttribute('aria-label',name.textContent+': '+descriptions.join(', '));row.append(bar,counts);
+        }
+        chart.append(row);
       }
-      const note=document.createElement('small');note.textContent='';chart.append(note);
     }
   }
   function labelReviews(){
@@ -82,7 +96,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       if(requestedPath!==location.pathname||!b.result)return;
       reviewCounts=b.reviewCounts;outcomes=b.outcomes;labelReviews();labelOutcomes();
       link.href='/operations?tab=run&run='+encodeURIComponent(b.oracleRunId);
-      message.textContent=`Saved ${b.historical?'historical ':''}gate: ${b.result.decision} · ${b.result.criticalCandidateFailures??'Not recorded'} confirmed critical candidate responses · ${b.result.pendingReviews??'Not recorded'} pending reviews.`;
+      message.textContent=`${b.historical?'Historical gate':'Gate'}: ${b.result.decision} · ${b.result.criticalCandidateFailures??'Not recorded'} confirmed critical · ${b.result.pendingReviews??'Not recorded'} pending reviews`;
       message.title=(b.result.reasons||[]).join('\n');
       const refresh=document.createElement('a');refresh.href='/eval/'+encodeURIComponent(b.oracleRunId);refresh.textContent='Refresh';refresh.dataset.runControls='true';toolbar.append(refresh);
     }).catch(()=>{message.textContent='Gate: Not recorded · open run controls to check saved evidence';});
